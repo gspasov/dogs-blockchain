@@ -1,6 +1,5 @@
 dist: xenial
 language: elixir
-sudo: required
 elixir:
   - 1.6.2
 otp_release:

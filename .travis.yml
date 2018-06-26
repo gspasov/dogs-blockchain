@@ -15,12 +15,21 @@ before_install:
   - curl https://sh.rustup.rs -sSf | sh -s -- -y
   - source $HOME/.cargo/env
 
-script:
-  - mix compile --warnings-as-errors
-  - mix credo list
-  - mix format --check-formatted
-  - mix coveralls -u
-  - mix dialyzer 
+jobs:
+  include:
+    - stage: compile
+      script:
+        - mix compile --warnings-as-errors
+    - stage: lint
+      script:
+        - mix credo list
+        - mix format --check-formatted
+    - stage: test
+      script:
+        - mix coveralls -u
+    - stage: typecheck
+      script:
+        - mix dialyzer
 
 cache:
   directories:

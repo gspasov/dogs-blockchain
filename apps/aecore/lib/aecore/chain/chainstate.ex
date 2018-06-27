@@ -8,18 +8,23 @@ defmodule Aecore.Chain.Chainstate do
   alias Aecore.Account.Account
   alias Aecore.Account.AccountStateTree
   alias Aecore.Chain.Chainstate
+  alias Aecore.Naming.NamingStateTree
   alias Aeutil.Bits
   alias Aecore.Oracle.Oracle
-  alias Aecore.Naming.Naming
   alias Aecore.Miner.Worker, as: Miner
   alias Aecore.Wallet.Worker, as: Wallet
 
   require Logger
 
+  @type accounts :: AccountStateTree.accounts_state()
+  @type oracles :: Oracle.t()
+  @type naming :: NamingStateTree.namings_state()
+  @type chain_state_types :: :accounts | :oracles | :naming | :none
+
   @type t :: %Chainstate{
-          accounts: AccountStateTree.accounts_state(),
-          oracles: Oracle.t(),
-          naming: Naming.state()
+          accounts: accounts,
+          oracles: oracles,
+          naming: naming
         }
 
   defstruct [
@@ -28,21 +33,21 @@ defmodule Aecore.Chain.Chainstate do
     :naming
   ]
 
-  @spec init :: Chainstate.t()
+  @spec init :: t()
   def init do
     %Chainstate{
       :accounts => AccountStateTree.init_empty(),
       :oracles => %{registered_oracles: %{}, interaction_objects: %{}},
-      :naming => Naming.init_empty()
+      :naming => NamingStateTree.init_empty()
     }
   end
 
   @spec calculate_and_validate_chain_state(
           list(),
-          Chainstate.t(),
+          t(),
           non_neg_integer(),
           Wallet.pubkey()
-        ) :: {:ok, Chainstate.t()} | {:error, String.t()}
+        ) :: {:ok, t()} | {:error, String.t()}
   def calculate_and_validate_chain_state(txs, chainstate, block_height, miner) do
     chainstate_with_coinbase =
       calculate_chain_state_coinbase(txs, chainstate, block_height, miner)
@@ -89,10 +94,10 @@ defmodule Aecore.Chain.Chainstate do
     end
   end
 
-  @spec apply_transaction_on_state(Chainstate.t(), non_neg_integer(), SignedTx.t()) ::
-          Chainstate.t()
+  @spec apply_transaction_on_state(t(), non_neg_integer(), SignedTx.t()) ::
+          t() | {:error, String.t()}
   def apply_transaction_on_state(chainstate, block_height, tx) do
-    case SignedTx.validate(tx) do
+    case SignedTx.validate(tx, block_height) do
       :ok ->
         SignedTx.process_chainstate(chainstate, block_height, tx)
 
@@ -104,7 +109,7 @@ defmodule Aecore.Chain.Chainstate do
   @doc """
   Create the root hash of the tree.
   """
-  @spec calculate_root_hash(Chainstate.t()) :: binary()
+  @spec calculate_root_hash(t()) :: binary()
   def calculate_root_hash(chainstate) do
     AccountStateTree.root_hash(chainstate.accounts)
   end
@@ -112,7 +117,7 @@ defmodule Aecore.Chain.Chainstate do
   @doc """
   Goes through all the transactions and only picks the valid ones
   """
-  @spec get_valid_txs(list(), Chainstate.t(), non_neg_integer()) :: list()
+  @spec get_valid_txs(list(), t(), non_neg_integer()) :: list()
   def get_valid_txs(txs_list, chainstate, block_height) do
     {txs_list, _} =
       List.foldl(txs_list, {[], chainstate}, fn tx, {valid_txs_list, chainstate} ->
@@ -127,13 +132,6 @@ defmodule Aecore.Chain.Chainstate do
       end)
 
     Enum.reverse(txs_list)
-  end
-
-  @spec calculate_total_tokens(Chainstate.t()) :: non_neg_integer()
-  def calculate_total_tokens(%{accounts: accounts_tree}) do
-    AccountStateTree.reduce(accounts_tree, 0, fn {pub_key, _value}, acc ->
-      acc + Account.balance(accounts_tree, pub_key)
-    end)
   end
 
   def base58c_encode(bin) do

@@ -12,7 +12,6 @@ defmodule Aecore.Oracle.Oracle do
   alias Aecore.Tx.Pool.Worker, as: Pool
   alias Aecore.Wallet.Worker, as: Wallet
   alias Aecore.Chain.Worker, as: Chain
-  alias Aecore.Account.Account
   alias Aeutil.Serialization
   alias Aeutil.Parser
   alias ExJsonSchema.Schema, as: JsonSchema
@@ -52,9 +51,15 @@ defmodule Aecore.Oracle.Oracle do
   Registers an oracle with the given requirements for queries and responses,
   a fee that should be paid by queries and a TTL.
   """
-  @spec register(json_schema(), json_schema(), non_neg_integer(), non_neg_integer(), ttl()) ::
-          :ok | :error
-  def register(query_format, response_format, query_fee, fee, ttl) do
+  @spec register(
+          json_schema(),
+          json_schema(),
+          non_neg_integer(),
+          non_neg_integer(),
+          ttl(),
+          non_neg_integer()
+        ) :: :ok | :error
+  def register(query_format, response_format, query_fee, fee, ttl, tx_ttl \\ 0) do
     payload = %{
       query_format: query_format,
       response_format: response_format,
@@ -68,7 +73,8 @@ defmodule Aecore.Oracle.Oracle do
         payload,
         Wallet.get_public_key(),
         fee,
-        Chain.lowest_valid_nonce()
+        Chain.lowest_valid_nonce(),
+        tx_ttl
       )
 
     {:ok, tx} = SignedTx.sign_tx(tx_data, Wallet.get_public_key(), Wallet.get_private_key())
@@ -79,9 +85,16 @@ defmodule Aecore.Oracle.Oracle do
   Creates a query transaction with the given oracle address, data query
   and a TTL of the query and response.
   """
-  @spec query(Account.pubkey(), json(), non_neg_integer(), non_neg_integer(), ttl(), ttl()) ::
-          :ok | :error
-  def query(oracle_address, query_data, query_fee, fee, query_ttl, response_ttl) do
+  @spec query(
+          Wallet.pubkey(),
+          json(),
+          non_neg_integer(),
+          non_neg_integer(),
+          ttl(),
+          ttl(),
+          non_neg_integer()
+        ) :: :ok | :error
+  def query(oracle_address, query_data, query_fee, fee, query_ttl, response_ttl, tx_ttl \\ 0) do
     payload = %{
       oracle_address: oracle_address,
       query_data: query_data,
@@ -96,7 +109,8 @@ defmodule Aecore.Oracle.Oracle do
         payload,
         Wallet.get_public_key(),
         fee,
-        Chain.lowest_valid_nonce()
+        Chain.lowest_valid_nonce(),
+        tx_ttl
       )
 
     {:ok, tx} = SignedTx.sign_tx(tx_data, Wallet.get_public_key(), Wallet.get_private_key())
@@ -107,8 +121,8 @@ defmodule Aecore.Oracle.Oracle do
   Creates an oracle response transaction with the query referenced by its
   transaction hash and the data of the response.
   """
-  @spec respond(binary(), any(), non_neg_integer()) :: :ok | :error
-  def respond(query_id, response, fee) do
+  @spec respond(binary(), any(), non_neg_integer(), non_neg_integer()) :: :ok | :error
+  def respond(query_id, response, fee, tx_ttl \\ 0) do
     payload = %{
       query_id: query_id,
       response: response
@@ -120,15 +134,16 @@ defmodule Aecore.Oracle.Oracle do
         payload,
         Wallet.get_public_key(),
         fee,
-        Chain.lowest_valid_nonce()
+        Chain.lowest_valid_nonce(),
+        tx_ttl
       )
 
     {:ok, tx} = SignedTx.sign_tx(tx_data, Wallet.get_public_key(), Wallet.get_private_key())
     Pool.add_transaction(tx)
   end
 
-  @spec extend(non_neg_integer(), non_neg_integer()) :: :ok | :error
-  def extend(ttl, fee) do
+  @spec extend(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: :ok | :error
+  def extend(ttl, fee, tx_ttl \\ 0) do
     payload = %{
       ttl: ttl
     }
@@ -139,7 +154,8 @@ defmodule Aecore.Oracle.Oracle do
         payload,
         Wallet.get_public_key(),
         fee,
-        Chain.lowest_valid_nonce()
+        Chain.lowest_valid_nonce(),
+        tx_ttl
       )
 
     {:ok, tx} = SignedTx.sign_tx(tx_data, Wallet.get_public_key(), Wallet.get_private_key())
@@ -177,7 +193,7 @@ defmodule Aecore.Oracle.Oracle do
     ttl - block_height
   end
 
-  @spec tx_ttl_is_valid?(oracle_txs_with_ttl(), non_neg_integer()) :: boolean
+  @spec tx_ttl_is_valid?(oracle_txs_with_ttl() | SignedTx.t(), non_neg_integer()) :: boolean
   def tx_ttl_is_valid?(tx, block_height) do
     case tx do
       %OracleRegistrationTx{} ->
@@ -340,7 +356,8 @@ defmodule Aecore.Oracle.Oracle do
     {:error, "#{__MODULE__}: Invalid Oracle struct #{inspect(data)}"}
   end
 
-  @spec rlp_decode(list()) :: {:ok, Account.t()} | Block.t() | DataTx.t()
+  @spec rlp_decode(list(), :registered_oracle | :interaction_object) ::
+          {:ok, map()} | {:error, String.t()}
   def rlp_decode(
         [orc_owner, query_format, response_format, query_fee, expires],
         :registered_oracle

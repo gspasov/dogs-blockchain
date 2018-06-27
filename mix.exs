@@ -62,6 +62,7 @@ defmodule EpochElixir.Mixfile do
       {:porcelain, "~> 2.0"},
       {:bip0173, "~> 0.1.2"},
       {:erl_base58, "~> 0.0.1"},
+      {:temp, "~> 0.4"},
       {:ex_rlp, "~> 0.2.1"},
       {:temp, "~> 0.4"},
       {:merkle_patricia_tree, git: "https://github.com/aeternity/elixir-merkle-patricia-tree.git"}

@@ -10,10 +10,6 @@ defmodule Aecore.Tx.DataTx do
   alias Aecore.Tx.DataTx
   alias Aecore.Account.Tx.SpendTx
   alias Aeutil.Serialization
-  alias Aecore.Structures.OracleRegistrationTx
-  alias Aecore.Structures.OracleQueryTx
-  alias Aecore.Structures.OracleResponseTx
-  alias Aecore.Structures.OracleExtendTx
   alias Aeutil.Bits
   alias Aecore.Account.Account
   alias Aecore.Account.AccountStateTree
@@ -22,6 +18,8 @@ defmodule Aecore.Tx.DataTx do
   alias Aecore.Oracle.Tx.OracleRegistrationTx
   alias Aecore.Oracle.Tx.OracleResponseTx
   alias Aecore.Wallet.Worker, as: Wallet
+  alias Aecore.Chain.Chainstate
+  alias Aecore.Chain.Worker, as: Chain
 
   require Logger
 
@@ -30,7 +28,7 @@ defmodule Aecore.Tx.DataTx do
           SpendTx
           | OracleExtendTx
           | OracleRegistrationTx
-          | OracleResponseTx
+          | OracleQueryTx
           | OracleResponseTx
           | NamePreClaimTx
           | NameClaimTx
@@ -60,7 +58,8 @@ defmodule Aecore.Tx.DataTx do
           payload: payload(),
           senders: list(binary()),
           fee: non_neg_integer(),
-          nonce: non_neg_integer()
+          nonce: non_neg_integer(),
+          ttl: non_neg_integer()
         }
 
   @doc """
@@ -73,7 +72,7 @@ defmodule Aecore.Tx.DataTx do
   - fee: The amount of tokens given to the miner
   - nonce: An integer bigger then current nonce of main sender Account. (see senders)
   """
-  defstruct [:type, :payload, :senders, :fee, :nonce]
+  defstruct [:type, :payload, :senders, :fee, :nonce, :ttl]
   use ExConstructor
 
   def valid_types do
@@ -91,37 +90,65 @@ defmodule Aecore.Tx.DataTx do
     ]
   end
 
-  @spec init(tx_types(), payload(), list(binary()) | binary(), non_neg_integer(), integer()) ::
-          DataTx.t()
-  def init(type, payload, senders, fee, nonce) when is_list(senders) do
-    %DataTx{type: type, payload: type.init(payload), senders: senders, nonce: nonce, fee: fee}
+  @spec init(
+          tx_types(),
+          map(),
+          list(binary()) | binary(),
+          non_neg_integer(),
+          integer(),
+          non_neg_integer()
+        ) :: t()
+  def init(type, payload, senders, fee, nonce, ttl \\ 0) do
+    if is_list(senders) do
+      %DataTx{
+        type: type,
+        payload: type.init(payload),
+        senders: senders,
+        nonce: nonce,
+        fee: fee,
+        ttl: ttl
+      }
+    else
+      %DataTx{
+        type: type,
+        payload: type.init(payload),
+        senders: [senders],
+        nonce: nonce,
+        fee: fee,
+        ttl: ttl
+      }
+    end
   end
 
-  def init(type, payload, sender, fee, nonce) when is_binary(sender) do
-    %DataTx{type: type, payload: type.init(payload), senders: [sender], nonce: nonce, fee: fee}
-  end
-
-  @spec fee(DataTx.t()) :: non_neg_integer()
+  @spec fee(t()) :: non_neg_integer()
   def fee(%DataTx{fee: fee}) do
     fee
   end
 
-  @spec senders(DataTx.t()) :: list(binary())
+  @spec senders(t()) :: list(binary())
   def senders(%DataTx{senders: senders}) do
     senders
   end
 
-  @spec main_sender(DataTx.t()) :: binary() | nil
+  @spec main_sender(t()) :: binary() | nil
   def main_sender(tx) do
     List.first(senders(tx))
   end
 
-  @spec nonce(DataTx.t()) :: non_neg_integer()
+  @spec nonce(t()) :: non_neg_integer()
   def nonce(%DataTx{nonce: nonce}) do
     nonce
   end
 
-  @spec payload(DataTx.t()) :: map()
+  @spec ttl(t()) :: non_neg_integer()
+  def ttl(%DataTx{ttl: ttl}) do
+    case ttl do
+      0 -> :max_ttl
+      ttl -> ttl
+    end
+  end
+
+  @spec payload(t()) :: map()
   def payload(%DataTx{payload: payload, type: type}) do
     if Enum.member?(valid_types(), type) do
       type.init(payload)
@@ -134,8 +161,8 @@ defmodule Aecore.Tx.DataTx do
   @doc """
   Checks whether the fee is above 0.
   """
-  @spec validate(DataTx.t()) :: :ok | {:error, String.t()}
-  def validate(%DataTx{fee: fee, type: type} = tx) do
+  @spec validate(t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def validate(%DataTx{fee: fee, type: type} = tx, block_height \\ Chain.top_height()) do
     cond do
       !Enum.member?(valid_types(), type) ->
         {:error, "#{__MODULE__}: Invalid tx type=#{type}"}
@@ -146,6 +173,16 @@ defmodule Aecore.Tx.DataTx do
       !senders_pubkeys_size_valid?(tx.senders) ->
         {:error, "#{__MODULE__}: Invalid senders pubkey size"}
 
+      DataTx.ttl(tx) < 0 ->
+        {:error,
+         "#{__MODULE__}: Invalid TTL value: #{DataTx.ttl(tx)} can't be a negative integer."}
+
+      DataTx.ttl(tx) < block_height ->
+        {:error,
+         "#{__MODULE__}: Invalid or expired TTL value: #{DataTx.ttl(tx)}, with given block's height: #{
+           block_height
+         }"}
+
       true ->
         payload_validate(tx)
     end
@@ -155,8 +192,8 @@ defmodule Aecore.Tx.DataTx do
   Changes the chainstate (account state and tx_type_state) according
   to the given transaction requirements
   """
-  @spec process_chainstate(ChainState.chainstate(), non_neg_integer(), DataTx.t()) ::
-          {:ok, ChainState.chainstate()} | {:error, String.t()}
+  @spec process_chainstate(Chainstate.t(), non_neg_integer(), t()) ::
+          {:ok, Chainstate.t()} | {:error, String.t()}
   def process_chainstate(chainstate, block_height, %DataTx{fee: fee} = tx) do
     accounts_state = chainstate.accounts
     payload = payload(tx)
@@ -182,7 +219,7 @@ defmodule Aecore.Tx.DataTx do
              tx
            ) do
       new_chainstate =
-        if tx.type.get_chain_state_name() == nil do
+        if tx.type.get_chain_state_name() == :none do
           %{chainstate | accounts: new_accounts_state}
         else
           %{chainstate | accounts: new_accounts_state}
@@ -196,8 +233,7 @@ defmodule Aecore.Tx.DataTx do
     end
   end
 
-  @spec preprocess_check(ChainState.chainstate(), non_neg_integer(), DataTx.t()) ::
-          :ok | {:error, String.t()}
+  @spec preprocess_check(Chainstate.t(), non_neg_integer(), t()) :: :ok | {:error, String.t()}
   def preprocess_check(chainstate, block_height, tx) do
     accounts_state = chainstate.accounts
     payload = payload(tx)
@@ -215,13 +251,14 @@ defmodule Aecore.Tx.DataTx do
     end
   end
 
-  @spec serialize(DataTx.t()) :: map()
+  @spec serialize(map()) :: map()
   def serialize(%DataTx{} = tx) do
     map_without_senders = %{
       "type" => Serialization.serialize_value(tx.type),
       "payload" => Serialization.serialize_value(tx.payload),
       "fee" => Serialization.serialize_value(tx.fee),
-      "nonce" => Serialization.serialize_value(tx.nonce)
+      "nonce" => Serialization.serialize_value(tx.nonce),
+      "ttl" => Serialization.serialize_value(tx.ttl)
     }
 
     if length(tx.senders) == 1 do
@@ -235,13 +272,13 @@ defmodule Aecore.Tx.DataTx do
     end
   end
 
-  @spec deserialize(map()) :: DataTx.t()
+  @spec deserialize(map()) :: t()
   def deserialize(%{sender: sender} = data_tx) do
-    init(data_tx.type, data_tx.payload, [sender], data_tx.fee, data_tx.nonce)
+    init(data_tx.type, data_tx.payload, [sender], data_tx.fee, data_tx.nonce, data_tx.ttl)
   end
 
   def deserialize(%{senders: senders} = data_tx) do
-    init(data_tx.type, data_tx.payload, senders, data_tx.fee, data_tx.nonce)
+    init(data_tx.type, data_tx.payload, senders, data_tx.fee, data_tx.nonce, data_tx.ttl)
   end
 
   def base58c_encode(bin) do
@@ -257,11 +294,11 @@ defmodule Aecore.Tx.DataTx do
   end
 
   @spec standard_deduct_fee(
-          AccountStateTree.accounts_state(),
+          Chainstate.accounts(),
           non_neg_integer(),
-          DataTx.t(),
+          t(),
           non_neg_integer()
-        ) :: Account.t()
+        ) :: Chainstate.accounts()
   def standard_deduct_fee(accounts, block_height, data_tx, fee) do
     sender = DataTx.main_sender(data_tx)
 
@@ -288,8 +325,7 @@ defmodule Aecore.Tx.DataTx do
     true
   end
 
-  @spec rlp_encode(non_neg_integer(), non_neg_integer(), DataTx.t()) ::
-          binary() | {:error, String.t()}
+  @spec rlp_encode(non_neg_integer(), non_neg_integer(), t()) :: binary() | {:error, String.t()}
   def rlp_encode(tag, version, term) do
     encode(tag, version, term)
   end
@@ -302,6 +338,7 @@ defmodule Aecore.Tx.DataTx do
       tx.payload.receiver,
       tx.payload.amount,
       tx.fee,
+      tx.ttl,
       tx.nonce,
       tx.payload.payload
     ]
@@ -326,7 +363,8 @@ defmodule Aecore.Tx.DataTx do
       tx.payload.query_fee,
       ttl_type,
       tx.payload.ttl.ttl,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -352,7 +390,8 @@ defmodule Aecore.Tx.DataTx do
       tx.payload.query_ttl.ttl,
       ttl_type_r,
       tx.payload.response_ttl.ttl,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -370,7 +409,8 @@ defmodule Aecore.Tx.DataTx do
       tx.nonce,
       tx.payload.query_id,
       "$æx" <> Serialization.transform_item(tx.payload.response),
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -387,7 +427,8 @@ defmodule Aecore.Tx.DataTx do
       tx.senders,
       tx.nonce,
       tx.payload.ttl,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -404,7 +445,8 @@ defmodule Aecore.Tx.DataTx do
       tx.senders,
       tx.nonce,
       tx.payload.commitment,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -422,7 +464,8 @@ defmodule Aecore.Tx.DataTx do
       tx.nonce,
       tx.payload.name,
       tx.payload.name_salt,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -442,7 +485,8 @@ defmodule Aecore.Tx.DataTx do
       tx.payload.client_ttl,
       tx.payload.pointers,
       tx.payload.expire_by,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -459,7 +503,8 @@ defmodule Aecore.Tx.DataTx do
       tx.senders,
       tx.nonce,
       tx.payload.hash,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -477,7 +522,8 @@ defmodule Aecore.Tx.DataTx do
       tx.nonce,
       tx.payload.hash,
       tx.payload.target,
-      tx.fee
+      tx.fee,
+      tx.ttl
     ]
 
     try do
@@ -492,11 +538,7 @@ defmodule Aecore.Tx.DataTx do
     decode(tag, values)
   end
 
-  def rlp_decode(data) when is_binary(data) do
-    ExRLP.decode(data)
-  end
-
-  defp decode(SpendTx, [senders, receiver, amount, fee, nonce, payload]) do
+  defp decode(SpendTx, [senders, receiver, amount, fee, nonce, payload, ttl]) do
     DataTx.init(
       SpendTx,
       %{
@@ -507,7 +549,8 @@ defmodule Aecore.Tx.DataTx do
       },
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
@@ -521,7 +564,8 @@ defmodule Aecore.Tx.DataTx do
          query_ttl_value,
          encoded_response_ttl_type,
          response_ttl_value,
-         fee
+         fee,
+         ttl
        ]) do
     query_ttl_type =
       encoded_query_ttl_type
@@ -551,7 +595,8 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
@@ -563,7 +608,8 @@ defmodule Aecore.Tx.DataTx do
          query_fee,
          encoded_ttl_type,
          ttl_value,
-         fee
+         fee,
+         ttl
        ]) do
     ttl_type =
       encoded_ttl_type
@@ -586,11 +632,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(OracleResponseTx, [senders, nonce, encoded_query_id, encoded_response, fee]) do
+  defp decode(OracleResponseTx, [senders, nonce, encoded_query_id, encoded_response, fee, ttl]) do
     query_id = decode_format(encoded_query_id)
     response = decode_format(encoded_response)
 
@@ -604,11 +651,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(OracleExtendTx, [senders, nonce, ttl_value, fee]) do
+  defp decode(OracleExtendTx, [senders, nonce, ttl_value, fee, ttl]) do
     payload = %{
       ttl: Serialization.transform_item(ttl_value, :int)
     }
@@ -618,11 +666,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(NamePreClaimTx, [senders, nonce, commitment, fee]) do
+  defp decode(NamePreClaimTx, [senders, nonce, commitment, fee, ttl]) do
     payload = %NamePreClaimTx{commitment: commitment}
 
     DataTx.init(
@@ -630,11 +679,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(NameClaimTx, [senders, nonce, name, name_salt, fee]) do
+  defp decode(NameClaimTx, [senders, nonce, name, name_salt, fee, ttl]) do
     payload = %NameClaimTx{name: name, name_salt: name_salt}
 
     DataTx.init(
@@ -642,11 +692,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(NameUpdateTx, [senders, nonce, hash, name_ttl, pointers, ttl, fee]) do
+  defp decode(NameUpdateTx, [senders, nonce, hash, name_ttl, pointers, ttl, fee, ttl]) do
     payload = %NameUpdateTx{
       client_ttl: Serialization.transform_item(ttl, :int),
       expire_by: Serialization.transform_item(name_ttl, :int),
@@ -659,11 +710,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(NameRevokeTx, [senders, nonce, hash, fee]) do
+  defp decode(NameRevokeTx, [senders, nonce, hash, fee, ttl]) do
     payload = %NameRevokeTx{hash: hash}
 
     DataTx.init(
@@ -671,11 +723,12 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 
-  defp decode(NameTransferTx, [senders, nonce, hash, recipient, fee]) do
+  defp decode(NameTransferTx, [senders, nonce, hash, recipient, fee, ttl]) do
     payload = %NameTransferTx{hash: hash, target: recipient}
 
     DataTx.init(
@@ -683,7 +736,8 @@ defmodule Aecore.Tx.DataTx do
       payload,
       senders,
       Serialization.transform_item(fee, :int),
-      Serialization.transform_item(nonce, :int)
+      Serialization.transform_item(nonce, :int),
+      Serialization.transform_item(ttl, :int)
     )
   end
 

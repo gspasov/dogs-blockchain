@@ -7,6 +7,7 @@ defmodule EpochElixir.Mixfile do
       apps_path: "apps",
       version: "0.1.0",
       elixir: "~> 1.6",
+      project_path: "./",
       build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       deps: deps(),

@@ -14,7 +14,6 @@ defmodule Aeutil.Mixfile do
   def application do
     [
       extra_applications: [:logger],
-      applications: [:porcelain]
     ]
   end
 end

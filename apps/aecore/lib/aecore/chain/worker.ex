@@ -502,7 +502,8 @@ defmodule Aecore.Chain.Worker do
 
     if Enum.empty?(blocks_map) do
       [block_hash] = Map.keys(state.blocks_data_map)
-      Persistence.add_block_by_hash(block_hash, state.blocks_data_map[block_hash])
+      %{block: genesis_block} = state.blocks_data_map[block_hash]
+      Persistence.add_block_info(%{block: genesis_block, header: genesis_block.header})
     end
 
     is_empty_block_info = blocks_info |> Serialization.remove_struct() |> Enum.empty?()
@@ -511,8 +512,13 @@ defmodule Aecore.Chain.Worker do
       if is_empty_block_info do
         state.blocks_data_map
       else
+        ## TODO try to simplify this
         blocks_info =
-          Map.merge(blocks_info, blocks_map, fn _hash, info, block ->
+          Enum.reduce(blocks_info, %{},
+            fn {k, info}, acc ->
+              Map.put(acc, k, Map.put_new(info, :block, nil))
+            end) |>
+          Map.merge(blocks_map, fn _hash, info, block ->
             Map.put(info, :block, block)
           end)
 

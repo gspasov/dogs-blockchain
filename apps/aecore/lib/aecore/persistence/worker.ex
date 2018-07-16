@@ -38,6 +38,7 @@ defmodule Aecore.Persistence.Worker do
   end
 
   def add_block_info(%{block: block, header: header} = info) do
+    IO.inspect(info, label: "Add block info")
     hash = BlockValidation.block_header_hash(header)
     GenServer.call(__MODULE__, {:add_block_by_hash, {hash, block}})
 
@@ -287,11 +288,16 @@ defmodule Aecore.Persistence.Worker do
         blocks_family
         |> Rox.stream()
         |> Enum.reduce([], fn {_hash, %{header: %{height: height}}} = record, acc ->
+          #IO.inspect(record, label: "get blocks")
           if threshold < height do
             [record | acc]
           else
             acc
           end
+          (any, acc) ->
+            # DO DOOOOOOOOOOOOOOOOOOOOOOOo
+            #IO.inspect(any, label: "Any get blocks")
+          acc
         end)
       end
 

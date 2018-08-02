@@ -388,6 +388,8 @@ defmodule Aeutil.Serialization do
           | :channel_onchain
           | :block
           | :signedtx
+          | :contract
+          | :call
         ) :: binary | {:error, String.t()}
   def rlp_encode(%DataTx{} = term, :tx) do
     with {:ok, tag} <- type_to_tag(term.type),
@@ -433,6 +435,30 @@ defmodule Aeutil.Serialization do
          "#{__MODULE__} : Invalid Registered Oracle state serialization: #{inspect(error)}"}
     end
   end
+
+  # def rlp_encode(%{} = term, :contract) when is_map(term) do
+  #   with {:ok, tag} <- type_to_tag(Contract),
+  #        {:ok, version} <- get_version(Contract),
+  #        data <- Contract.rlp_encode(tag, version, term) do
+  #     data
+  #   else
+  #     error ->
+  #       {:error,
+  #        "#{__MODULE__} : Invalid Registered Contract state serialization: #{inspect(error)}"}
+  #   end
+  # end
+  #
+  # def rlp_encode(%{} = term, :call) when is_map(term) do
+  #   with {:ok, tag} <- type_to_tag(Call),
+  #        {:ok, version} <- get_version(Call),
+  #        data <- Call.rlp_encode(tag, version, term) do
+  #     data
+  #   else
+  #     error ->
+  #       {:error,
+  #        "#{__MODULE__} : Invalid Registered Contract Call state serialization: #{inspect(error)}"}
+  #   end
+  # end
 
   def rlp_encode(%{} = term, :naming_state) when is_map(term) do
     with {:ok, tag} <- type_to_tag(Name),
@@ -774,17 +800,23 @@ defmodule Aeutil.Serialization do
   def type_to_tag(OracleQuery),
     do: {:ok, Application.get_env(:aecore, :rlp_tags)[:oracle_query_state]}
 
-  def type_to_tag(ChannelStateOnChain), do: {:ok, 40}
+  def type_to_tag(Contract),
+    do: {:ok, Application.get_env(:aecore, :rlp_tags)[:contract_state]}
 
-  def type_to_tag(ChannelCloseMutalTx), do: {:ok, 41}
+  def type_to_tag(Call),
+    do: {:ok, Application.get_env(:aecore, :rlp_tags)[:contract_call_state]}
 
-  def type_to_tag(ChannelCloseSoloTx), do: {:ok, 42}
+  def type_to_tag(ChannelStateOnChain), do: {:ok, 50}
 
-  def type_to_tag(ChannelCreateTx), do: {:ok, 43}
+  def type_to_tag(ChannelCloseMutalTx), do: {:ok, 51}
 
-  def type_to_tag(ChannelSettleTx), do: {:ok, 44}
+  def type_to_tag(ChannelCloseSoloTx), do: {:ok, 52}
 
-  def type_to_tag(ChannelSlashTx), do: {:ok, 45}
+  def type_to_tag(ChannelCreateTx), do: {:ok, 53}
+
+  def type_to_tag(ChannelSettleTx), do: {:ok, 54}
+
+  def type_to_tag(ChannelSlashTx), do: {:ok, 55}
 
   def type_to_tag(Block), do: {:ok, Application.get_env(:aecore, :rlp_tags)[:block]}
 

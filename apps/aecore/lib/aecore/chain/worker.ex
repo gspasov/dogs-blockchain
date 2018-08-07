@@ -716,6 +716,9 @@ defmodule Aecore.Chain.Worker do
 
       {key = :channels, value}, acc_state ->
         Map.put(acc_state, key, value.root_hash)
+
+      {key = :calls, value}, acc_state ->
+        Map.put(acc_state, key, value.root_hash)
     end
   end
 

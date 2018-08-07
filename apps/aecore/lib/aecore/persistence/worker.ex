@@ -173,7 +173,8 @@ defmodule Aecore.Persistence.Worker do
        "patricia_naming_family" => patricia_naming_family,
        "total_difficulty_family" => total_difficulty_family,
        "patricia_channels_family" => patricia_channels_family,
-       "patricia_calls_family" => patricia_calls_family
+       "patricia_calls_family" => patricia_calls_family,
+       "patricia_contracts_family" => patricia_contracts_family
      }} =
       Rox.open(persistence_path(), [create_if_missing: true, auto_create_column_families: true], [
         "blocks_family",
@@ -188,7 +189,8 @@ defmodule Aecore.Persistence.Worker do
         "patricia_naming_family",
         "total_difficulty_family",
         "patricia_channels_family",
-        "patricia_calls_family"
+        "patricia_calls_family",
+        "patricia_contracts_family"
       ])
 
     {:ok,
@@ -208,7 +210,8 @@ defmodule Aecore.Persistence.Worker do
          test_trie: db,
          naming: patricia_naming_family,
          channels: patricia_channels_family,
-         calls: patricia_calls_family
+         calls: patricia_calls_family,
+         contracts: patricia_contracts_family
        }
      }}
   end

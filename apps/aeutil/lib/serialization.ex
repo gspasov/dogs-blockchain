@@ -28,6 +28,7 @@ defmodule Aeutil.Serialization do
   alias Aecore.Channel.Tx.ChannelSlashTx
   alias Aecore.Channel.Tx.ChannelSettleTx
   alias Aecore.Channel.ChannelStateOnChain
+  alias Aecore.Contract.Contract
   alias Aecore.Chain.Identifier
   require Logger
 
@@ -429,22 +430,22 @@ defmodule Aeutil.Serialization do
     end
   end
 
-  # def rlp_encode(%{} = term, :contract) when is_map(term) do
-  #   with {:ok, tag} <- type_to_tag(Contract),
-  #        {:ok, version} <- get_version(Contract),
-  #        data <- Contract.rlp_encode(tag, version, term) do
-  #     data
-  #   else
-  #     error ->
-  #       {:error,
-  #        "#{__MODULE__} : Invalid Registered Contract state serialization: #{inspect(error)}"}
-  #   end
-  # end
-  #
+  def rlp_encode(%{} = term, :contract) when is_map(term) do
+    with {:ok, tag} <- type_to_tag(Contract),
+         {:ok, version} <- get_version(Contract),
+         data <- Contract.rlp_encode(tag, version, term) do
+      data
+    else
+      error ->
+        {:error,
+         "#{__MODULE__} : Invalid Registered Contract state serialization: #{inspect(error)}"}
+    end
+  end
+
   def rlp_encode(%{} = term, :call) when is_map(term) do
     with {:ok, tag} <- type_to_tag(Call),
          {:ok, version} <- get_version(Call),
-         data <- Call.rlp_encode(tag, version, term, :call) do
+         data <- Call.rlp_encode(tag, version, term) do
       data
     else
       error ->
@@ -559,6 +560,10 @@ defmodule Aeutil.Serialization do
 
   defp rlp_decode(Call, _version, call) do
     Call.rlp_decode(call)
+  end
+
+  defp rlp_decode(Contract, _version, contract) do
+    Contract.rlp_decode(contract)
   end
 
   # account decoding

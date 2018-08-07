@@ -35,9 +35,9 @@ defmodule Call do
     }
   end
 
-  @spec rlp_encode(non_neg_integer(), non_neg_integer(), map(), :call) ::
+  @spec rlp_encode(non_neg_integer(), non_neg_integer(), map()) ::
           binary() | {:error, String.t()}
-  def rlp_encode(tag, version, %{} = call, :call) do
+  def rlp_encode(tag, version, %{} = call) do
     {:ok, encoded_caller_address} = Identifier.encode_data(call.caller_address)
     {:ok, encoded_contract_address} = Identifier.encode_data(call.contract_address)
 

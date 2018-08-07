@@ -16,16 +16,18 @@ defmodule Call do
         }
 
   @type t :: call()
+  @type hash :: binary()
 
-  @pubkey_size 32
   @nonce_size 256
 
-  def new_call(caller, nonce, address, block_height, gas_price) do
+  @spec new_call(hash(), non_neg_integer(), hash(), non_neg_integer(), non_neg_integer()) ::
+          call()
+  def new_call(caller, nonce, block_height, contract_address, gas_price) do
     %{
       :caller_address => caller,
       :caller_nonce => nonce,
       :height => block_height,
-      :contract_address => address,
+      :contract_address => contract_address,
       :gas_price => gas_price,
       :gas_used => 0,
       :return_value => <<>>,
@@ -95,8 +97,7 @@ defmodule Call do
 
   @spec id(binary(), non_neg_integer(), binary()) :: binary()
   def id(caller, nonce, contract) do
-    binary =
-      <<caller.value::binary, nonce::size(@nonce_size ), contract.value::binary>>
+    binary = <<caller.value::binary, nonce::size(@nonce_size), contract.value::binary>>
 
     Hash.hash(binary)
   end

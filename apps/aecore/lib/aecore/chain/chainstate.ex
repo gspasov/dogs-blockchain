@@ -34,20 +34,23 @@ defmodule Aecore.Chain.Chainstate do
   @type oracles :: OracleStateTree.oracles_state()
   @type naming :: NamingStateTree.namings_state()
   @type channels :: ChannelStateTree.channel_state()
-  @type chain_state_types :: :accounts | :oracles | :naming | :channels
+  @type calls :: CallStateTree.calls_state()
+  @type chain_state_types :: :accounts | :oracles | :naming | :channels | :calls
 
   @type t :: %Chainstate{
           accounts: accounts(),
           oracles: oracles(),
           naming: naming(),
-          channels: channels()
+          channels: channels(),
+          calls: calls()
         }
 
   defstruct [
     :accounts,
     :oracles,
     :naming,
-    :channels
+    :channels,
+    :calls
   ]
 
   @spec init :: t()
@@ -56,7 +59,8 @@ defmodule Aecore.Chain.Chainstate do
       :accounts => AccountStateTree.init_empty(),
       :oracles => OracleStateTree.init_empty(),
       :naming => NamingStateTree.init_empty(),
-      :channels => ChannelStateTree.init_empty()
+      :channels => ChannelStateTree.init_empty(),
+      :calls => CallStateTree.init_empty()
     }
   end
 
@@ -129,7 +133,8 @@ defmodule Aecore.Chain.Chainstate do
     [
       AccountStateTree.root_hash(chainstate.accounts),
       NamingStateTree.root_hash(chainstate.naming),
-      OracleStateTree.root_hash(chainstate.oracles)
+      OracleStateTree.root_hash(chainstate.oracles),
+      CallStateTree.root_hash(chainstate.calls)
     ]
     |> Enum.reduce(<<@protocol_version::size(@protocol_version_field_size)>>, fn root_hash, acc ->
       acc <> pad_empty(root_hash)
